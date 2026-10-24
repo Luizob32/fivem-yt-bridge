@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+	<meta charset="UTF-8">
+	<!-- Publicado num site de verdade (GitHub Pages), o YouTube aceita o player: e isso que evita o erro 153 dentro do FiveM. -->
+	<meta name="referrer" content="strict-origin-when-cross-origin">
+	<title>YouTube Bridge</title>
+	<style>html, body { margin: 0; background: transparent; overflow: hidden; }</style>
+</head>
+<body>
+	<div id="Player"></div>
+
+	<script>
+		// Recebe comandos do xSound (resource "sounds" da cidade) por postMessage e devolve os eventos do player.
+		const Query = new URLSearchParams(location.search);
+		const Key = Query.get("id") || "";
+		const Video = (Query.get("v") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 11);
+		let Player = null;
+		let Volume = 100;
+
+		const Send = (Type, Data = {}) => parent.postMessage(Object.assign({ source: "ytbridge", id: Key, type: Type }, Data), "*");
+
+		// O navegador pode iniciar o video MUDO quando ele comeca sozinho dentro de outro site.
+		// Sempre que tocar ou mudar o volume, tira o mudo e reaplica o volume pedido pelo xSound.
+		const Apply = () => {
+			if (!Player || typeof Player.unMute !== "function") return;
+			Player.unMute();
+			Player.setVolume(Volume);
+		};
+
+		window.onYouTubeIframeAPIReady = () => {
+			if (!Video) return Send("error", { code: 2 });
+
+			Player = new YT.Player("Player", {
+				width: "200",
+				height: "200",
+				videoId: Video,
+				playerVars: { autoplay: 0, controls: 0, playsinline: 1, enablejsapi: 1, origin: location.origin },
+				events: {
+					onReady: () => Send("ready", { duration: Player.getDuration() }),
+					onStateChange: (Event) => {
+						if (Event.data === YT.PlayerState.PLAYING) {
+							Apply();
+							setTimeout(() => Send("muted", { muted: Player.isMuted(), volume: Player.getVolume() }), 800);
+						}
+						Send("state", { state: Event.data, duration: Player.getDuration() });
+					},
+					onError: (Event) => Send("error", { code: Event.data })
+				}
+			});
+		};
+
+		addEventListener("message", (Event) => {
+			const Message = Event.data;
+			if (!Message || Message.target !== "ytbridge" || !Player) return;
+
+			switch (Message.cmd) {
+				case "play": Player.playVideo(); Apply(); break;
+				case "pause": Player.pauseVideo(); break;
+				case "stop": Player.stopVideo(); break;
+				case "seek": Player.seekTo(Number(Message.value) || 0, true); break;
+				case "volume": Volume = Math.max(0, Math.min(100, Number(Message.value) || 0)); Apply(); break;
+				case "unmute": Apply(); break;
+			}
+		});
+	</script>
+	<script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
